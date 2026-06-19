@@ -1,0 +1,89 @@
+const express = require('express');
+const path = require('path');
+const app = express();
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// База данных в оперативной памяти (БЕЗ файлов, чтобы Vercel не перезагружался с ошибкой)
+let db = {
+    users: { "bot_banker": { "password": "123", "balance": 5000, "role": "admin" } },
+    orders: []
+};
+
+app.post('/api/register', (req, res) => {
+    const username = req.body.username.trim().toLowerCase(); // Игнорируем регистр
+    const password = req.body.password;
+    if (db.users[username]) return res.status(400).json({ success: false, message: 'Ник занят' });
+    
+    db.users[username] = { password, balance: 0, role: 'user' };
+    res.json({ success: true, username: username });
+});
+
+app.post('/api/login', (req, res) => {
+    const username = req.body.username.trim().toLowerCase();
+    const password = req.body.password;
+    if (db.users[username] && db.users[username].password === password) {
+        res.json({ success: true, username: username });
+    } else res.status(401).json({ success: false, message: 'Неверный логин или пароль' });
+});
+
+app.post('/api/transfer', (req, res) => {
+    const sender = req.body.sender.toLowerCase();
+    const recipient = req.body.recipient.trim().toLowerCase();
+    const sum = parseInt(req.body.amount);
+
+    if (!sum || sum <= 0) return res.status(400).json({ success: false, message: 'Неверная сумма' });
+    if (!db.users[sender] || !db.users[recipient]) return res.status(400).json({ success: false, message: 'Игрок не найден' });
+    if (db.users[sender].balance < sum) return res.status(400).json({ success: false, message: 'Недостаточно РБ' });
+
+    db.users[sender].balance -= sum;
+    db.users[recipient].balance += sum;
+    res.json({ success: true });
+});
+
+app.post('/api/admin/give', (req, res) => {
+    const admin = req.body.admin.toLowerCase();
+    const recipient = req.body.recipient.trim().toLowerCase();
+    const sum = parseInt(req.body.amount);
+
+    if (db.users[admin]?.role !== 'admin') return res.status(403).json({ success: false });
+    if (!db.users[recipient] || isNaN(sum)) return res.status(400).json({ success: false, message: 'Игрок не найден' });
+    
+    db.users[recipient].balance += sum;
+    res.json({ success: true });
+});
+
+app.post('/api/order', (req, res) => {
+    const username = req.body.username.toLowerCase();
+    const item = req.body.item;
+    if (db.users[username].balance < 100 && db.users[username].role !== 'admin') {
+        return res.status(400).json({ success: false, message: 'Недостаточно РБ!' });
+    }
+    if (db.users[username].role !== 'admin') db.users[username].balance -= 100;
+    
+    db.orders.push({ id: Date.now(), username, item, status: 'В обработке' });
+    res.json({ success: true });
+});
+
+app.get('/api/data/:username', (req, res) => {
+    const username = req.params.username.toLowerCase();
+    const u = db.users[username];
+    if (!u) return res.status(404).json({});
+    res.json({
+        balance: u.balance,
+        role: u.role,
+        myOrders: db.orders.filter(o => o.username === username),
+        allOrders: u.role === 'admin' ? db.orders : []
+    });
+});
+
+app.post('/api/update-status', (req, res) => {
+    const { id, status } = req.body;
+    const order = db.orders.find(o => o.id === id);
+    if (order) order.status = status;
+    res.json({ success: true });
+});
+
+// ВАЖНОЕ ИЗМЕНЕНИЕ ДЛЯ VERCEL:
+module.exports = app;
