@@ -1,190 +1,67 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>КЛЕР БАНК</title>
-    <style>
-        body { background: #0a0a0a; color: white; font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; margin: 0; padding: 15px; font-size: 16px; }
-        .box { width: 100%; max-width: 400px; margin: 10px auto; padding: 20px; background: #151515; border-radius: 20px; border: 1px solid #333; box-sizing: border-box; }
-        .panel { background: #222; padding: 15px; border-radius: 15px; margin-bottom: 15px; text-align: left; }
-        .panel h4 { margin: 0 0 10px 0; color: #8a2be2; }
-        input { width: 100%; padding: 14px; margin: 6px 0; border-radius: 10px; border: none; box-sizing: border-box; font-size: 16px; background: #2a2a2a; color: white; }
-        button { width: 100%; padding: 14px; margin: 8px 0; border-radius: 10px; border: none; cursor: pointer; font-weight: bold; font-size: 16px; }
-        .btn-main { background: #8a2be2; color: white; }
-        .btn-sec { background: #333; color: white; }
-        .btn-transfer { background: #00ffcc; color: black; }
-        .order-card { background: #2a2a2a; padding: 12px; margin: 10px 0; border-radius: 10px; text-align: left; font-size: 14px; border-left: 4px solid #8a2be2; }
-        .status-btn-group { display: flex; gap: 5px; margin-top: 10px; }
-        .btn-status { flex: 1; padding: 8px 0; border: none; border-radius: 6px; color: white; font-size: 12px; font-weight: bold; cursor: pointer; }
-    </style>
+    <title>2D Minecraft Multiplayer</title>
+    <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
-
-<div id="auth" class="box">
-    <h2>Вход в КЛЕР БАНК</h2>
-    <input id="u" placeholder="Никнейм">
-    <input id="p" type="password" placeholder="Пароль">
-    <button class="btn-main" onclick="auth('login')">Войти</button>
-    <button class="btn-sec" onclick="auth('register')">Регистрация</button>
-</div>
-
-<div id="main" class="box" style="display:none">
-    <h2 style="margin-bottom: 5px;">КЛЕР БАНК</h2>
-    <h3 style="margin-top: 0;">Баланс: <span id="bal" style="color: #00ffcc;">0</span> РБ</h3>
+    <canvas id="gameCanvas" width="600" height="400"></canvas>
     
-    <div class="panel">
-        <h4>💸 Перевод РБ игроку</h4>
-        <input id="t-user" placeholder="Ник получателя">
-        <input id="t-amount" type="number" placeholder="Сумма перевода">
-        <button class="btn-transfer" onclick="transfer()">Отправить</button>
-    </div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const TILE_SIZE = 20;
+        
+        let world = [];
+        let currentBlock = 1; // 0 - удалить, 1 - земля
+        
+        // Подключаемся к серверу
+        const socket = io();
 
-    <div class="panel">
-        <h4>🛒 Заказать маску</h4>
-        <input id="item" placeholder="Название маски">
-        <button class="btn-main" onclick="order()">Заказать (100 РБ)</button>
-    </div>
-    
-    <h4 style="text-align: left; margin-left: 5px;">Ваши заказы:</h4>
-    <div id="my-orders"></div>
-
-    <div id="admin-panel" style="display:none; border-top: 2px solid #8a2be2; margin-top: 20px; padding-top: 10px;">
-        <h3 style="color: #8a2be2; margin-bottom: 10px;">👑 Админ-панель</h3>
-        <div class="panel" style="background: #1a1a1a; border: 1px solid #8a2be2;">
-            <h4 style="color: #00ffcc;">Выдать РБ</h4>
-            <input id="a-user" placeholder="Ник игрока">
-            <input id="a-amount" type="number" placeholder="Сумма">
-            <button style="background: #8a2be2; color: white;" onclick="adminGive()">Начислить</button>
-        </div>
-        <h4 style="text-align: left;">Все заказы:</h4>
-        <div id="all-orders"></div>
-    </div>
-
-    <button class="btn-sec" onclick="logout()" style="background:#555; padding:10px; margin-top:20px;">Выйти из аккаунта</button>
-</div>
-
-<script>
-    let windowUser = null;
-
-    document.addEventListener("DOMContentLoaded", () => {
-        const saved = localStorage.getItem('cler_bank_user');
-        if (saved) {
-            windowUser = saved;
-            document.getElementById('auth').style.display = 'none';
-            document.getElementById('main').style.display = 'block';
-            updateData();
-            setInterval(updateData, 3000);
-        }
-    });
-
-    async function auth(type) {
-        const u = document.getElementById('u').value.trim();
-        const p = document.getElementById('p').value;
-        if(!u || !p) return alert("Заполните поля!");
-
-        const res = await fetch('/api/'+type, { 
-            method:'POST', headers:{'Content-Type':'application/json'}, 
-            body:JSON.stringify({username: u, password: p})
+        // 1. Получаем начальный мир от сервера при подключении
+        socket.on('initWorld', (serverWorld) => {
+            world = serverWorld;
+            drawWorld();
         });
-        const data = await res.json();
-        
-        if(data.success) { 
-            windowUser = data.username;
-            localStorage.setItem('cler_bank_user', windowUser);
-            document.getElementById('auth').style.display='none'; 
-            document.getElementById('main').style.display='block'; 
-            updateData();
-            setInterval(updateData, 3000);
-        } else { alert(data.message || "Ошибка!"); }
-    }
 
-    function logout() {
-        localStorage.removeItem('cler_bank_user');
-        location.reload();
-    }
+        // 2. Получаем обновления отдельных блоков от других игроков (и от себя)
+        socket.on('updateBlock', (data) => {
+            world[data.y][data.x] = data.blockType;
+            drawWorld(); // Перерисовываем мир с новым блоком
+        });
 
-    async function updateData() {
-        if (!windowUser) return;
-        const res = await fetch('/api/data/' + windowUser);
-        
-        if (res.status === 404) {
-            logout();
-            return;
+        // Функция отрисовки (осталась почти такой же)
+        function drawWorld() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let y = 0; y < world.length; y++) {
+                for (let x = 0; x < world[y].length; x++) {
+                    if (world[y][x] === 1) {
+                        ctx.fillStyle = '#8B4513';
+                        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    }
+                }
+            }
         }
 
-        const data = await res.json();
-        document.getElementById('bal').innerText = data.balance;
-        
-        document.getElementById('my-orders').innerHTML = data.myOrders.map(o => 
-            `<div class="order-card"><b>${o.item}</b><br><span style="color:#aaa">Статус:</span> ${o.status}</div>`
-        ).join('') || "<p style='color:gray; font-size:14px;'>Заказов нет</p>";
-
-        if(data.role === 'admin') {
-            document.getElementById('admin-panel').style.display = 'block';
-            document.getElementById('all-orders').innerHTML = data.allOrders.map(o => 
-                `<div class="order-card">
-                    <b>От:</b> ${o.username} | <b>Маска:</b> ${o.item}<br>
-                    <b>Статус:</b> <span style="color:#00ffcc">${o.status}</span>
-                    <div class="status-btn-group">
-                        <button class="btn-status" style="background: #ff9800;" onclick="setStatus(${o.id}, '🛠 Делается')">Делается</button>
-                        <button class="btn-status" style="background: #17a2b8;" onclick="setStatus(${o.id}, '📦 Лежит в ПВЗ')">В ПВЗ</button>
-                        <button class="btn-status" style="background: #28a745;" onclick="setStatus(${o.id}, '✅ Выдано')">Выдано</button>
-                    </div>
-                </div>`
-            ).join('') || "<p style='color:gray; font-size:14px;'>Нет активных заказов</p>";
-        }
-    }
-
-    async function transfer() {
-        const recipient = document.getElementById('t-user').value;
-        const amount = document.getElementById('t-amount').value;
-        if(!recipient || !amount) return alert("Заполните поля!");
-
-        const res = await fetch('/api/transfer', { 
-            method:'POST', headers:{'Content-Type':'application/json'}, 
-            body:JSON.stringify({sender: windowUser, recipient: recipient, amount: amount})
+        // Обработка клика
+        canvas.addEventListener('mousedown', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            
+            const gridX = Math.floor(mouseX / TILE_SIZE);
+            const gridY = Math.floor(mouseY / TILE_SIZE);
+            
+            // ВАЖНО: Мы больше не меняем мир напрямую!
+            // Мы просим сервер изменить блок.
+            const newBlockType = world[gridY][gridX] === 0 ? 1 : 0;
+            
+            socket.emit('placeBlock', {
+                x: gridX,
+                y: gridY,
+                blockType: newBlockType
+            });
         });
-        const data = await res.json();
-        if(data.success) {
-            alert(`Успешно переведено ${amount} РБ!`);
-            document.getElementById('t-user').value = ''; document.getElementById('t-amount').value = '';
-            updateData();
-        } else { alert(data.message); }
-    }
-
-    async function adminGive() {
-        const recipient = document.getElementById('a-user').value;
-        const amount = document.getElementById('a-amount').value;
-        const res = await fetch('/api/admin/give', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({admin: windowUser, recipient, amount})
-        });
-        if((await res.json()).success) {
-            alert(`Выдано ${amount} РБ!`);
-            document.getElementById('a-user').value = ''; document.getElementById('a-amount').value = '';
-            updateData();
-        } else { alert("Ошибка выдачи"); }
-    }
-
-    async function order() {
-        const item = document.getElementById('item').value;
-        if(!item) return alert("Укажите название!");
-        await fetch('/api/order', { 
-            method:'POST', headers:{'Content-Type':'application/json'}, 
-            body:JSON.stringify({username: windowUser, item: item})
-        });
-        document.getElementById('item').value = '';
-        updateData();
-    }
-
-    async function setStatus(id, status) {
-        await fetch('/api/update-status', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({id, status})
-        });
-        updateData();
-    }
-</script>
+    </script>
 </body>
 </html>
