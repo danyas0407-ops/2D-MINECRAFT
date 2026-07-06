@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BrowserCraft</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; touch-action: none; font-family: sans-serif; }
+        canvas { display: block; }
+        
+        /* Главное меню */
+        #menu {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.8); color: white;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 1000;
+        }
+        #menu h1 { font-size: 40px; margin-bottom: 20px; color: #4CAF50; }
+        #start-btn {
+            padding: 15px 40px; font-size: 24px; background: #4CAF50; color: white;
+            border: none; border-radius: 10px; font-weight: bold;
+        }
+
+        /* Игровой интерфейс */
+        #game-ui { display: none; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+            transform: translate(-50%, -50%); color: white; font-size: 24px;
+            font-weight: bold; text-align: center; line-height: 20px; z-index: 50;
+            pointer-events: none; /* Чтобы прицел не мешал нажимать на экран */
+        }
+        #joystick-zone { position: absolute; left: 0; bottom: 0; width: 50%; height: 100%; z-index: 10; }
+        
+        /* Кнопки действий справа */
+        .action-btn {
+            position: absolute; right: 20px; width: 60px; height: 60px;
+            background: rgba(255, 255, 255, 0.5); border: 2px solid white;
+            border-radius: 50%; font-size: 30px; display: flex;
+            align-items: center; justify-content: center; z-index: 50;
+        }
+        #break-btn { bottom: 100px; }
+        #place-btn { bottom: 20px; }
+    </style>
+</head>
+<body>
+    <!-- Меню -->
+    <div id="menu">
+        <h1>BrowserCraft</h1>
+        <button id="start-btn">Играть</button>
+    </div>
+
+    <!-- Интерфейс игры -->
+    <div id="game-ui">
+        <div id="crosshair">+</div>
+        <div id="joystick-zone"></div>
+        <div id="break-btn" class="action-btn">⛏️</div>
+        <div id="place-btn" class="action-btn">🧱</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+
+    <script>
+        // === 1. НАСТРОЙКА СЦЕНЫ ===
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 10, 30);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const player = new THREE.Group();
+        player.position.set(0, 2, 0);
+        player.add(camera);
+        scene.add(player);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const light = new THREE.DirectionalLight(0xffffff, 0.8);
+        light.position.set(10, 20, 10);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x606060));
+
+        // === 2. ГЕНЕРАЦИЯ БЛОКОВ ===
+        const interactableBlocks = []; // Сюда складываем блоки, чтобы их можно было ломать
+        
+        const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+        const grassMat = new THREE.MeshLambertMaterial({ color: 0x55aa55 }); // Трава
+        const dirtMat = new THREE.MeshLambertMaterial({ color: 0x8b4513 }); // Земля
+
+        // Создаем платформу 20x20 блоков
+        for (let x = -10; x < 10; x++) {
+            for (let z = -10; z < 10; z++) {
+                const block = new THREE.Mesh(boxGeo, grassMat);
+                block.position.set(x, 0, z);
+                scene.add(block);
+                interactableBlocks.push(block); // Добавляем в список для взаимодействия
+                
+                // Добавляем слой земли под травой
+                const dirt = new THREE.Mesh(boxGeo, dirtMat);
+                dirt.position.set(x, -1, z);
+                scene.add(dirt);
+                interactableBlocks.push(dirt);
+            }
+        }
+
+        // === 3. СИСТЕМА ЛОМАНИЯ И СТРОИТЕЛЬСТВА (RAYCASTING) ===
+        const raycaster = new THREE.Raycaster();
+        const center = new THREE.Vector2(0, 0); // Центр экрана
+
+        function getTargetBlock() {
+            raycaster.setFromCamera(center, camera);
+            const intersects = raycaster.intersectObjects(interactableBlocks);
+            return intersects.length > 0 ? intersects[0] : null;
+        }
+
+        // Кнопка ЛОМАТЬ
+        document.getElementById('break-btn').addEventListener('touchstart', (e) => {
+            e.stopPropagation(); // Чтобы камера не дергалась при нажатии
+            const target = getTargetBlock();
+            if (target && target.distance < 5) { // Дистанция, до которой достают руки (5 блоков)
+                scene.remove(target.object);
+                const index = interactableBlocks.indexOf(target.object);
+                if (index > -1) interactableBlocks.splice(index, 1); // Удаляем из памяти
+            }
+        }, {passive: false});
+
+        // Кнопка СТРОИТЬ
+        document.getElementById('place-btn').addEventListener('touchstart', (e) => {
+            e.stopPropagation();
+            const target = getTargetBlock();
+            if (target && target.distance < 5) {
+                const normal = target.face.normal; // Узнаем, на какую грань смотрим
+                const pos = target.object.position.clone().add(normal); // Позиция нового блока
+                
+                // Проверяем, не ставим ли мы блок в самих себя
+                if (Math.abs(player.position.x - pos.x) < 0.8 && Math.abs(player.position.z - pos.z) < 0.8 && pos.y >= 0 && pos.y <= 2) {
+                    return; // Блокируем установку в теле игрока
+                }
+
+                const newBlock = new THREE.Mesh(boxGeo, dirtMat); // Ставим блоки земли
+                newBlock.position.copy(pos);
+                scene.add(newBlock);
+                interactableBlocks.push(newBlock);
+            }
+        }, {passive: false});
+
+
+        // === 4. УПРАВЛЕНИЕ ===
+        let moveForward = 0, moveRight = 0;
+        const speed = 0.15;
+        let isDragging = false, previousTouch = { x: 0, y: 0 };
+        let rotationY = 0, rotationX = 0;
+
+        // Логика джойстика
+        const joystick = nipplejs.create({ zone: document.getElementById('joystick-zone'), mode: 'dynamic', color: 'white' });
+        joystick.on('move', (evt, data) => {
+            const force = Math.min(data.force, 1);
+            moveForward = Math.sin(data.angle.radian) * force;
+            moveRight = Math.cos(data.angle.radian) * force;
+        });
+        joystick.on('end', () => { moveForward = 0; moveRight = 0; });
+
+        // Логика вращения камерой (справа)
+        document.addEventListener('touchstart', (e) => {
+            if (e.touches[0].clientX < window.innerWidth / 2 || e.target.classList.contains('action-btn')) return; 
+            isDragging = true;
+            previousTouch.x = e.touches[0].clientX; previousTouch.y = e.touches[0].clientY;
+        }, {passive: false});
+
+        document.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            let touch = Array.from(e.touches).find(t => t.clientX > window.innerWidth / 2);
+            if (!touch || e.target.classList.contains('action-btn')) return;
+
+            rotationY -= (touch.clientX - previousTouch.x) * 0.005;
+            rotationX -= (touch.clientY - previousTouch.y) * 0.005;
+            rotationX = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, rotationX));
+
+            player.rotation.y = rotationY;
+            camera.rotation.x = rotationX;
+            previousTouch.x = touch.clientX; previousTouch.y = touch.clientY;
+        }, {passive: false});
+
+        document.addEventListener('touchend', () => isDragging = false);
+
+        // === 5. ИГРОВОЙ ЦИКЛ ===
+        function animate() {
+            requestAnimationFrame(animate);
+            if (moveForward !== 0 || moveRight !== 0) {
+                player.translateZ(-moveForward * speed);
+                player.translateX(moveRight * speed);
+                
+                // Простая граница, чтобы не уйти за край платформы
+                player.position.x = Math.max(-10, Math.min(10, player.position.x));
+                player.position.z = Math.max(-10, Math.min(10, player.position.z));
+            }
+            renderer.render(scene, camera);
+        }
+
+        // === 6. ЗАПУСК ИГРЫ ИЗ МЕНЮ ===
+        document.getElementById('start-btn').addEventListener('click', () => {
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('game-ui').style.display = 'block';
+            animate();
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
